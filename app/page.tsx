@@ -71,7 +71,6 @@ export default function Home() {
     const clean = raw.trim();
     const normalized = normalizeText(clean);
 
-    // Policy 1: cancellation always wins.
     if (isCancel(clean)) {
       const hadOrder = cart.length > 0;
       setCart([]); setAwaitingDrink(false);
@@ -79,11 +78,15 @@ export default function Home() {
       return;
     }
 
-    // Policy 2: replacement is atomic — remove the old item and add the new one.
-    const replacement = normalized.match(/(?:change|replace|swap|switch)\s+(.+?)\s+(?:to|for|with)\s+(.+)/i) || normalized.match(/(?:i\s+)?(?:dont|do not)\s+want\s+(.+?)\s+(?:anymore\s*)?(?:give me|add|take)\s+(.+?)(?:\s+instead)?$/i);
-    if (replacement && /\b(?:instead|change|replace|swap|switch|dont|do not)\b/i.test(normalized)) {
-      const from = findMenuMatches(replacement[1]);
-      const to = findMenuMatches(replacement[2]);
+    // Substitution forms: “change Coke to Viju”, “Coke instead of Fanta”,
+    // and “I don’t want Coke anymore. Give me Viju instead.”
+    const replacement = normalized.match(/(?:change|replace|swap|switch)\s+(.+?)\s+(?:to|for|with)\s+(.+)/i)
+      || normalized.match(/(.+?)\s+instead\s+of\s+(.+)/i)
+      || normalized.match(/(?:i\s+)?(?:dont|do not)\s+want\s+(.+?)\s+(?:anymore\s*)?(?:give me|add|take)\s+(.+?)(?:\s+instead)?$/i);
+    if (replacement) {
+      const insteadForm = /\s+instead\s+of\s+/i.test(normalized);
+      const from = findMenuMatches(replacement[insteadForm ? 2 : 1]);
+      const to = findMenuMatches(replacement[insteadForm ? 1 : 2]);
       if (from.length && to.length) {
         const old = from[0], next = to[0];
         const oldQty = cart.find(i => i.id === old.id)?.qty || 1;
@@ -98,7 +101,6 @@ export default function Home() {
       }
     }
 
-    // Policy 3: quantity corrections mutate the cart; they never add a duplicate.
     const setQuantity = normalized.match(/(?:make|set|change)\s+(?:the\s+)?(.+?)\s+(?:to\s+)?(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/i) || normalized.match(/(?:i\s+)?(?:only\s+want|want)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(.+)/i);
     if (setQuantity) {
       const quantityFirst = /^(?:\d|one\b|two\b|three\b|four\b|five\b|six\b|seven\b|eight\b|nine\b|ten\b)/i.test(setQuantity[1]);
@@ -113,7 +115,6 @@ export default function Home() {
       }
     }
 
-    // Policy 4: removal can decrement by a requested quantity or remove the whole line.
     const remove = normalized.match(/^(remove|delete|take out|drop)\s+(.+)/i) || normalized.match(/(?:i\s+)?(?:dont|do not)\s+want\s+(.+?)(?:\s+anymore)?$/i);
     if (remove) {
       const target = findMenuMatches(remove[2] || remove[1]);
@@ -127,7 +128,6 @@ export default function Home() {
       return;
     }
 
-    // Policy 5: explicit context action. A non-drink instruction can interrupt drink selection.
     if (/^(choose|add|give me|i want)\s+(a\s+)?drink$/i.test(clean) || clean === 'Choose a drink') {
       setAwaitingDrink(true); ai('Sure. Which drink would you like?', DRINK_CHIPS); return;
     }
@@ -145,7 +145,6 @@ export default function Home() {
     }
     if (awaitingDrink && nonDrinkMatches.length) setAwaitingDrink(false);
 
-    // Policy 6: finish only after higher-priority mutations and context actions.
     if (isDone(clean)) {
       if (!cart.length) ai('I’m ready when you are. Try “2 jollof and 1 fried rice” or “jollof with Fanta and plantain.”');
       else ai('Perfect. Would you like this for delivery or pickup?', ['Delivery', 'Pickup']);
@@ -161,7 +160,6 @@ export default function Home() {
     }
     if (isGreeting(clean)) { ai('Hey there. Tell me what you’d like, or ask “what do you have?” to see the menu.'); return; }
 
-    // Policy 7: normal order/add flow.
     if (matches.length) {
       matches.forEach(item => add(item, quantityFor(textForMatching, item)));
       const parts = matches.map(item => `${quantityFor(textForMatching, item)}× ${item.name}`);
