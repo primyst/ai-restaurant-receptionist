@@ -43,17 +43,36 @@ export const menu: MenuItem[] = [
   { id: 'ginger', name: 'Ginger Drink', price: 1200, emoji: '🫚', category: 'Drinks', aliases: ['ginger', 'ginger drink'], available: true },
 ];
 
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&');
+
 export const findMenuMatches = (raw: string) => {
   const text = raw.toLowerCase().replace(/[’']/g, '').replace(/-/g, ' ');
-  return menu.filter(item => item.available && item.aliases.some(alias => {
-    const normalized = alias.toLowerCase().replace(/-/g, ' ');
-    return new RegExp(`(^|\\s)${normalized.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}(?=\\s|$)`).test(text);
-  }));
+  const candidates = menu.flatMap(item => item.aliases.map(alias => ({
+    item,
+    alias: alias.toLowerCase().replace(/-/g, ' '),
+  }))).sort((a, b) => b.alias.length - a.alias.length);
+  const used: Array<[number, number]> = [];
+  const found: MenuItem[] = [];
+
+  for (const candidate of candidates) {
+    if (!candidate.item.available) continue;
+    const regex = new RegExp(`(^|\\s)${escapeRegExp(candidate.alias)}(?=\\s|$)`, 'g');
+    const match = regex.exec(text);
+    if (!match) continue;
+    const start = match.index + match[1].length;
+    const end = start + candidate.alias.length;
+    const overlaps = used.some(([from, to]) => start < to && end > from);
+    if (overlaps) continue;
+    used.push([start, end]);
+    found.push(candidate.item);
+  }
+
+  return found;
 };
 
 export const findUnavailableWords = (raw: string, matches: MenuItem[]) => {
   const normalized = raw.toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9\\s-]/g, ' ');
   const known = new Set(matches.flatMap(item => item.aliases.flatMap(alias => alias.toLowerCase().split(/\\s+/))));
-  const stop = new Set(['i','want','need','like','get','give','please','can','you','me','some','and','with','for','the','a','an','of','to','my','order','orders','food','drink','drinks','meal','meals','also','then','plus','make','it','two','three','four','five','one','some','more','another','piece','pieces','bottle','bottles','plate','plates']);
+  const stop = new Set(['i','want','need','like','get','give','please','can','you','me','some','and','with','for','the','a','an','of','to','my','order','orders','food','drink','drinks','meal','meals','also','then','plus','make','it','two','three','four','five','one','some','more','another','piece','pieces','bottle','bottles','plate','plates','delivery','pickup']);
   return [...new Set(normalized.split(/\\s+/).filter(word => word.length > 2 && !stop.has(word) && !known.has(word)))].slice(0, 3);
 };
