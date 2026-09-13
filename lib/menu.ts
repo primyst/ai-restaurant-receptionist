@@ -46,7 +46,7 @@ export const menu: MenuItem[] = [
   { id: 'hollandia', name: 'Hollandia Yoghurt', price: 1200, category: 'Drinks', kind: 'drink', aliases: ['hollandia', 'hollandia yoghurt', 'hollandia yogurt'], available: true },
   { id: 'peak-milk', name: 'Peak Milk', price: 700, category: 'Drinks', kind: 'drink', aliases: ['peak milk', 'peak'], available: true },
   { id: 'bigi', name: 'Bigi Cola', price: 400, category: 'Drinks', kind: 'drink', aliases: ['bigi', 'bigi cola'], available: true },
-  { id: 'lacacera', name: 'LaCasera', price: 500, category: 'Drinks', kind: 'drink', aliases: ['lacacera', 'la casera'], available: true },
+  { id: 'viju-milk', name: 'Viju Milk', price: 800, category: 'Drinks', kind: 'drink', aliases: ['viju', 'viju milk'], available: true },
   { id: 'water', name: 'Bottled Water', price: 300, category: 'Drinks', kind: 'drink', aliases: ['water', 'bottle water', 'bottled water'], available: true },
 ];
 
