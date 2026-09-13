@@ -36,7 +36,7 @@ export const menu: MenuItem[] = [
   { id: 'fried-chicken', name: 'Fried Chicken', price: 2200, category: 'Proteins', kind: 'addon', aliases: ['fried chicken'], available: true },
   { id: 'fish', name: 'Grilled Fish', price: 4500, category: 'Proteins', kind: 'addon', aliases: ['fish', 'grilled fish'], available: true },
   { id: 'suya', name: 'Beef Suya', price: 3500, category: 'Proteins', kind: 'addon', aliases: ['suya', 'beef suya'], available: true },
-  { id: 'coke', name: 'Coca-Cola', price: 500, category: 'Drinks', kind: 'drink', aliases: ['coke', 'coca cola', 'coca-cola', 'cola'], available: true },
+  { id: 'coke', name: 'Coca-Cola', price: 500, category: 'Drinks', kind: 'drink', aliases: ['coke', 'coca cola', 'coca-cola', 'cokes', 'cola'], available: true },
   { id: 'fanta', name: 'Fanta', price: 500, category: 'Drinks', kind: 'drink', aliases: ['fanta'], available: true },
   { id: 'sprite', name: 'Sprite', price: 500, category: 'Drinks', kind: 'drink', aliases: ['sprite'], available: true },
   { id: '7up', name: '7UP', price: 500, category: 'Drinks', kind: 'drink', aliases: ['7up', '7 up'], available: true },
