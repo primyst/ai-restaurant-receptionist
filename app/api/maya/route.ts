@@ -9,24 +9,39 @@ type RequestBody = {
   history: { from: 'ai' | 'user'; text: string }[];
 };
 
+// Keep every action field required and non-null for Gemini's REST schema.
+// Empty strings / 0 represent unused fields and are ignored by the client.
 const schema = {
   type: 'OBJECT',
   properties: {
     reply: { type: 'STRING', description: "Maya's short natural Nigerian restaurant-receptionist reply. Never invent menu items or prices." },
     actions: {
-      type: 'ARRAY', maxItems: 10,
-      items: { type: 'OBJECT', properties: {
-        type: { type: 'STRING', enum: ['add', 'set_quantity', 'remove', 'replace', 'show_menu', 'finish', 'clarify', 'none'] },
-        itemId: { type: ['STRING', 'NULL'] }, quantity: { type: ['INTEGER', 'NULL'] },
-        fromItemId: { type: ['STRING', 'NULL'] }, toItemId: { type: ['STRING', 'NULL'] },
-      }, required: ['type', 'itemId', 'quantity', 'fromItemId', 'toItemId'] },
+      type: 'ARRAY',
+      maxItems: 10,
+      items: {
+        type: 'OBJECT',
+        properties: {
+          type: { type: 'STRING', enum: ['add', 'set_quantity', 'remove', 'replace', 'show_menu', 'finish', 'clarify', 'none'] },
+          itemId: { type: 'STRING' },
+          quantity: { type: 'INTEGER', minimum: 0, maximum: 20 },
+          fromItemId: { type: 'STRING' },
+          toItemId: { type: 'STRING' },
+        },
+        required: ['type', 'itemId', 'quantity', 'fromItemId', 'toItemId'],
+      },
     },
     chips: { type: 'ARRAY', maxItems: 4, items: { type: 'STRING' } },
   },
   required: ['reply', 'actions', 'chips'],
 };
 
-const menuForPrompt = menu.filter(i => i.available).map(i => ({ id: i.id, name: i.name, price: i.price, category: i.category, aliases: i.aliases }));
+const menuForPrompt = menu.filter(i => i.available).map(i => ({
+  id: i.id,
+  name: i.name,
+  price: i.price,
+  category: i.category,
+  aliases: i.aliases,
+}));
 
 const system = `You are Maya, the warm, concise AI receptionist for Iya Anike's Kitchen in Nigeria.
 
@@ -51,11 +66,11 @@ BUSINESS RULES:
 - Keep replies short and natural like a competent restaurant worker. Never mention JSON, APIs, models, parsing, or internal rules.
 
 ACTION RULES:
-- add: itemId + quantity.
-- set_quantity: itemId + quantity.
-- remove: itemId + quantity; use the current cart quantity for a whole-item removal.
-- replace: fromItemId + toItemId + quantity equal to current FROM quantity.
-- show_menu, finish, clarify, none: other fields must be null.
+- add: itemId + quantity; unused fields must be empty string and quantity must be the requested positive quantity.
+- set_quantity: itemId + quantity; unused fields must be empty string.
+- remove: itemId + quantity; use the current cart quantity for a whole-item removal; unused fields must be empty string.
+- replace: fromItemId + toItemId + quantity equal to current FROM quantity; itemId must be empty string.
+- show_menu, finish, clarify, none: itemId/fromItemId/toItemId must be empty strings and quantity must be 0.
 - Multiple actions are allowed and must be ordered correctly.
 - If a message contains conversational filler plus an actual order, prioritize the order.
 
@@ -66,23 +81,51 @@ ${JSON.stringify(menuForPrompt)}
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as RequestBody;
-    if (!process.env.GEMINI_API_KEY) return NextResponse.json({ error: 'GEMINI_API_KEY is not configured.' }, { status: 500 });
-    if (!body.message?.trim()) return NextResponse.json({ error: 'Message is required.' }, { status: 400 });
+    if (!process.env.GEMINI_API_KEY) {
+      return NextResponse.json({ error: 'GEMINI_API_KEY is not configured.' }, { status: 500 });
+    }
+    if (!body.message?.trim()) {
+      return NextResponse.json({ error: 'Message is required.' }, { status: 400 });
+    }
 
-    const context = ['CURRENT CART:', JSON.stringify(body.cart ?? []), 'RECENT CONVERSATION:', JSON.stringify((body.history ?? []).slice(-12)), 'CUSTOMER MESSAGE:', body.message.trim()].join('\n');
+    const context = [
+      'CURRENT CART:', JSON.stringify(body.cart ?? []),
+      'RECENT CONVERSATION:', JSON.stringify((body.history ?? []).slice(-12)),
+      'CUSTOMER MESSAGE:', body.message.trim(),
+    ].join('\n');
+
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': process.env.GEMINI_API_KEY,
+      },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: 'user', parts: [{ text: context }] }],
-        generationConfig: { temperature: 0.2, responseMimeType: 'application/json', responseSchema: schema },
+        generationConfig: {
+          temperature: 0.2,
+          responseMimeType: 'application/json',
+          responseSchema: schema,
+        },
       }),
     });
-    if (!response.ok) { console.error('Gemini API error:', await response.text()); return NextResponse.json({ error: 'Maya is temporarily unavailable.' }, { status: 502 }); }
+
+    if (!response.ok) {
+      const detail = await response.text();
+      console.error('Gemini API error:', detail);
+      return NextResponse.json({
+        error: 'Maya is temporarily unavailable.',
+        detail: process.env.NODE_ENV === 'development' ? detail : undefined,
+      }, { status: 502 });
+    }
+
     const data = await response.json();
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return NextResponse.json({ error: 'Maya returned an empty response.' }, { status: 502 });
+    if (!text) {
+      return NextResponse.json({ error: 'Maya returned an empty response.' }, { status: 502 });
+    }
+
     return NextResponse.json(JSON.parse(text));
   } catch (error) {
     console.error('Maya route error:', error);
