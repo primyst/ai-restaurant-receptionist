@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { menu } from '../../../lib/menu';
 
-const MODEL = 'gemini-2.5-flash';
+const MODEL = 'gemini-3.6-flash';
 
 type RequestBody = {
   message: string;
@@ -9,28 +9,37 @@ type RequestBody = {
   history: { from: 'ai' | 'user'; text: string }[];
 };
 
-// Keep every action field required and non-null for Gemini's REST schema.
-// Empty strings / 0 represent unused fields and are ignored by the client.
+// Interactions API structured output schema.
 const schema = {
-  type: 'OBJECT',
+  type: 'object',
   properties: {
-    reply: { type: 'STRING', description: "Maya's short natural Nigerian restaurant-receptionist reply. Never invent menu items or prices." },
+    reply: {
+      type: 'string',
+      description: "Maya's short natural Nigerian restaurant-receptionist reply. Never invent menu items or prices.",
+    },
     actions: {
-      type: 'ARRAY',
+      type: 'array',
       maxItems: 10,
       items: {
-        type: 'OBJECT',
+        type: 'object',
         properties: {
-          type: { type: 'STRING', enum: ['add', 'set_quantity', 'remove', 'replace', 'show_menu', 'finish', 'clarify', 'none'] },
-          itemId: { type: 'STRING' },
-          quantity: { type: 'INTEGER', minimum: 0, maximum: 20 },
-          fromItemId: { type: 'STRING' },
-          toItemId: { type: 'STRING' },
+          type: {
+            type: 'string',
+            enum: ['add', 'set_quantity', 'remove', 'replace', 'show_menu', 'finish', 'clarify', 'none'],
+          },
+          itemId: { type: 'string' },
+          quantity: { type: 'integer', minimum: 0, maximum: 20 },
+          fromItemId: { type: 'string' },
+          toItemId: { type: 'string' },
         },
         required: ['type', 'itemId', 'quantity', 'fromItemId', 'toItemId'],
       },
     },
-    chips: { type: 'ARRAY', maxItems: 4, items: { type: 'STRING' } },
+    chips: {
+      type: 'array',
+      maxItems: 4,
+      items: { type: 'string' },
+    },
   },
   required: ['reply', 'actions', 'chips'],
 };
@@ -81,9 +90,12 @@ ${JSON.stringify(menuForPrompt)}
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as RequestBody;
-    if (!process.env.GEMINI_API_KEY) {
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
       return NextResponse.json({ error: 'GEMINI_API_KEY is not configured.' }, { status: 500 });
     }
+
     if (!body.message?.trim()) {
       return NextResponse.json({ error: 'Message is required.' }, { status: 400 });
     }
@@ -94,26 +106,32 @@ export async function POST(request: Request) {
       'CUSTOMER MESSAGE:', body.message.trim(),
     ].join('\n');
 
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-goog-api-key': process.env.GEMINI_API_KEY,
+        'x-goog-api-key': apiKey,
       },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts: [{ text: context }] }],
-        generationConfig: {
-          temperature: 0.2,
-          responseMimeType: 'application/json',
-          responseSchema: schema,
+        model: MODEL,
+        input: context,
+        system_instruction: system,
+        response_format: {
+          type: 'text',
+          mime_type: 'application/json',
+          schema,
         },
+        generation_config: {
+          thinking_level: 'low',
+          max_output_tokens: 700,
+        },
+        store: false,
       }),
     });
 
     if (!response.ok) {
       const detail = await response.text();
-      console.error('Gemini API error:', detail);
+      console.error('Gemini Interactions API error:', detail);
       return NextResponse.json({
         error: 'Maya is temporarily unavailable.',
         detail: process.env.NODE_ENV === 'development' ? detail : undefined,
@@ -121,8 +139,19 @@ export async function POST(request: Request) {
     }
 
     const data = await response.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+
+    if (data?.status === 'failed') {
+      console.error('Gemini interaction failed:', JSON.stringify(data));
+      return NextResponse.json({ error: 'Maya could not process that message.' }, { status: 502 });
+    }
+
+    const text = data?.output_text
+      ?? data?.outputs?.find((output: { type?: string; text?: string }) => output.type === 'text')?.text
+      ?? data?.steps?.flatMap((step: { type?: string; content?: { type?: string; text?: string }[] }) => step.content ?? [])
+        .find((content: { type?: string; text?: string }) => content.type === 'text')?.text;
+
     if (!text) {
+      console.error('Gemini returned no text output:', JSON.stringify(data));
       return NextResponse.json({ error: 'Maya returned an empty response.' }, { status: 502 });
     }
 
