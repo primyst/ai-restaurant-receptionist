@@ -11,7 +11,6 @@ type Stage = 'chat' | 'details' | 'payment' | 'tracking';
 const money = (n: number) => `₦${n.toLocaleString()}`;
 const drinks = menu.filter(i => i.category === 'Drinks');
 const DRINK_CHIPS = drinks.map(i => i.name);
-const ADDON_CHIPS = ['Choose a drink', 'Add plantain', 'That’s all'];
 const numberWords: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
 const STAGES = [{ key: 'chat' as Stage, label: 'Order' }, { key: 'details' as Stage, label: 'Details' }, { key: 'payment' as Stage, label: 'Payment' }, { key: 'tracking' as Stage, label: 'Tracking' }];
 const initialMessages: Message[] = [{ id: 1, from: 'ai', text: "Welcome to Iya Anike's Kitchen. I'm Maya — tell me what you'd like and I'll get it sorted." }];
@@ -39,7 +38,7 @@ const hasExplicitQuantity = (raw: string, item: MenuItem) => {
 };
 
 const isCancel = (text: string) => /^(cancel(?:\s+the)?\s+order|cancel|start over|reset|never\s*mind|forget it)\b/i.test(text.trim());
-const isDone = (text: string) => /^(that'?s all|thats all|all|done|finish|finished|checkout|nothing else|no)$/i.test(text.trim());
+const isDone = (text: string) => /^(?:that'?s all|thats all|all done|done|i'?m done|im done|finish|finished|checkout|nothing else|no(?:\s+thanks?)?)$/i.test(normalizeText(text).trim());
 const stripFiller = (text: string) => normalizeText(text).replace(/\b(wait|actually|please|just|then|anymore|only|instead|a|an|the)\b/g, ' ').replace(/\s+/g, ' ').trim();
 
 export default function Home() {
@@ -67,6 +66,15 @@ export default function Home() {
   const setQty = (id: string, qty: number) => setCart(c => c.map(i => i.id === id ? { ...i, qty: Math.max(0, qty) } : i).filter(i => i.qty > 0));
   const change = (id: string, delta: number) => setQty(id, (cart.find(i => i.id === id)?.qty || 0) + delta);
 
+  const followUpChips = (items: MenuItem[]) => {
+    const hasDrink = items.some(i => i.category === 'Drinks');
+    const hasPlantain = items.some(i => i.id === 'fried-plantain' || i.name.toLowerCase().includes('plantain'));
+    if (hasDrink && hasPlantain) return ['That’s all'];
+    if (hasDrink) return ['Add plantain', 'That’s all'];
+    if (hasPlantain) return ['Add a drink', 'That’s all'];
+    return ['Add a drink', 'Add plantain', 'That’s all'];
+  };
+
   const process = (raw: string) => {
     const clean = raw.trim();
     const normalized = normalizeText(clean);
@@ -75,6 +83,14 @@ export default function Home() {
       const hadOrder = cart.length > 0;
       setCart([]); setAwaitingDrink(false);
       ai(hadOrder ? 'No problem, I’ve cleared that order. Let me know whenever you’re ready to start again.' : 'There’s nothing to cancel yet. What would you like?');
+      return;
+    }
+
+    // Finish/correct the conversation before interpreting the message as a menu item.
+    if (isDone(clean)) {
+      setAwaitingDrink(false);
+      if (!cart.length) ai('I’m ready when you are. Tell me what you’d like to order.');
+      else ai('Perfect. Would you like this for delivery or pickup?', ['Delivery', 'Pickup']);
       return;
     }
 
@@ -96,7 +112,7 @@ export default function Home() {
           return existing ? withoutOld.map(i => i.id === next.id ? { ...i, qty: i.qty + oldQty } : i) : [...withoutOld, { ...next, qty: oldQty }];
         });
         setAwaitingDrink(false);
-        ai(`Done — I swapped ${old.name} for ${next.name}. Anything else?`, ADDON_CHIPS);
+        ai(`Done — I swapped ${old.name} for ${next.name}. Anything else?`, followUpChips([next]));
         return;
       }
     }
@@ -109,7 +125,7 @@ export default function Home() {
       const target = findMenuMatches(targetText)[0];
       if (target) {
         const qty = Number(qtyRaw) || numberWords[qtyRaw] || 1;
-        if (cart.some(i => i.id === target.id)) { setQty(target.id, qty); ai(`Done — ${target.name} is now ${qty}×. Anything else?`, ADDON_CHIPS); }
+        if (cart.some(i => i.id === target.id)) { setQty(target.id, qty); ai(`Done — ${target.name} is now ${qty}×. Anything else?`, followUpChips([target])); }
         else ai(`${target.name} isn’t in your order yet. You can add it first, then change the quantity.`);
         return;
       }
@@ -124,11 +140,11 @@ export default function Home() {
       if (!present) { ai(`${item.name} isn’t in your order right now.`); return; }
       const qty = hasExplicitQuantity(clean, item) ? quantityFor(clean, item) : present.qty;
       setQty(item.id, present.qty - qty);
-      ai(`Removed ${Math.min(qty, present.qty)}× ${item.name}. Anything else?`, ADDON_CHIPS);
+      ai(`Removed ${Math.min(qty, present.qty)}× ${item.name}. Anything else?`, followUpChips([item]));
       return;
     }
 
-    if (/^(choose|add|give me|i want)\s+(a\s+)?drink$/i.test(clean) || clean === 'Choose a drink') {
+    if (/^(choose|add|give me|i want)\s+(a\s+)?drink$/i.test(clean) || clean === 'Choose a drink' || clean === 'Add a drink') {
       setAwaitingDrink(true); ai('Sure. Which drink would you like?', DRINK_CHIPS); return;
     }
 
@@ -140,16 +156,10 @@ export default function Home() {
     if (awaitingDrink && drinkMatches.length && !nonDrinkMatches.length) {
       drinkMatches.forEach(item => add(item, quantityFor(textForMatching, item)));
       setAwaitingDrink(false);
-      ai(`Added ${drinkMatches.map(i => `${quantityFor(textForMatching, i)}× ${i.name}`).join(', ')}. Anything else?`, ADDON_CHIPS);
+      ai(`Added ${drinkMatches.map(i => `${quantityFor(textForMatching, i)}× ${i.name}`).join(', ')}. Anything else?`, followUpChips(drinkMatches));
       return;
     }
     if (awaitingDrink && nonDrinkMatches.length) setAwaitingDrink(false);
-
-    if (isDone(clean)) {
-      if (!cart.length) ai('I’m ready when you are. Try “2 jollof and 1 fried rice” or “jollof with Fanta and plantain.”');
-      else ai('Perfect. Would you like this for delivery or pickup?', ['Delivery', 'Pickup']);
-      return;
-    }
 
     if (/\bdelivery\b/i.test(clean)) { setDelivery('delivery'); setStage('details'); ai('Delivery it is. I’ll need your name, phone number and delivery address next.'); return; }
     if (/\bpickup\b/i.test(clean)) { setDelivery('pickup'); setStage('details'); ai('Pickup it is. I’ll just need your name and phone number to attach to the order.'); return; }
@@ -164,8 +174,7 @@ export default function Home() {
       matches.forEach(item => add(item, quantityFor(textForMatching, item)));
       const parts = matches.map(item => `${quantityFor(textForMatching, item)}× ${item.name}`);
       const hasMain = matches.some(i => i.category === 'Mains');
-      const included = hasMain ? ' Each main already includes one fried chicken and one bottled water.' : '';
-      ai(`Got it — I've added ${parts.join(', ')}.${included} Anything else?`, ADDON_CHIPS);
+      ai(`Got it — I've added ${parts.join(', ')}. Anything else?`, followUpChips(matches));
       return;
     }
 
